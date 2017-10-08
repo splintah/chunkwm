@@ -405,8 +405,6 @@ CommandHandler(void *Data)
 
         if(!RuleUpdated)
         {
-            // window_rule *Result = (window_rule *) malloc(sizeof(window_rule));
-            // memcpy(Result, WindowRule, sizeof(window_rule));
             WindowRules.push_back(WindowRule);
         }
 
