@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <vector>
 
 #include "../../api/plugin_api.h"
 #include "../../common/accessibility/display.h"
@@ -26,6 +27,15 @@ internal border_window *Border;
 internal bool SkipFloating;
 internal bool DrawBorder;
 internal chunkwm_api API;
+internal void UpdateBorderCustomColor(macos_application *FocusedApplication);
+
+struct window_rule
+{
+    char *Owner;
+    unsigned Color;
+    bool DrawBorder;
+};
+internal std::vector<window_rule *> WindowRules;
 
 internal AXUIElementRef
 GetFocusedWindow()
@@ -185,6 +195,9 @@ internal void
 WindowFocusedHandler(void *Data)
 {
     macos_window *Window = (macos_window *) Data;
+
+    UpdateBorderCustomColor(Window->Owner);
+
     if((AXLibIsWindowStandard(Window)) &&
        ((Window->Owner == Application) ||
        (Application == NULL)))
@@ -284,6 +297,35 @@ StringEquals(const char *A, const char *B)
 }
 
 internal void
+UpdateBorderCustomColor(macos_application *FocusedApplication)
+{
+    char *WindowName = FocusedApplication->Name;
+
+    bool CustomColorSpecifiedForWindow = false;
+
+    for(int Index = 0; Index < WindowRules.size(); ++Index)
+    {
+        window_rule *WindowRule = WindowRules.at(Index);
+        if(StringEquals(WindowRule->Owner, WindowName))
+        {
+            CustomColorSpecifiedForWindow = true;
+
+            if(!WindowRule->DrawBorder)
+            {
+                UpdateBorderWindowColor(Border, 0x00000000);
+                break;
+            }
+
+            UpdateBorderWindowColor(Border, WindowRule->Color);
+            break;
+        }
+    }
+
+    if(!CustomColorSpecifiedForWindow)
+        UpdateBorderWindowColor(Border, CVarUnsignedValue("focused_border_color"));
+}
+
+internal void
 CommandHandler(void *Data)
 {
     chunkwm_payload *Payload = (chunkwm_payload *) Data;
@@ -305,6 +347,69 @@ CommandHandler(void *Data)
         {
             ClearBorderWindow(Border);
         }
+    }
+    else if(StringEquals(Payload->Command, "rule"))
+    {
+        window_rule *WindowRule = (window_rule *) malloc(sizeof(window_rule));
+        WindowRule->Color = CVarUnsignedValue("focused_border_color");
+        WindowRule->DrawBorder = true;
+
+        while(Payload->Message)
+        {
+            token Token = GetToken(&Payload->Message);
+
+            if (Token.Length <= 0)
+                break;
+
+            char *Arg = TokenToString(Token);
+
+            if(StringEquals(Arg, "--owner"))
+            {
+                token Value = GetToken(&Payload->Message);
+                if(Value.Length > 0)
+                {
+                    char *Owner = TokenToString(Value);
+                    WindowRule->Owner = Owner;
+                }
+            }
+            else if(StringEquals(Arg, "--color"))
+            {
+                token Value = GetToken(&Payload->Message);
+                if(Value.Length > 0)
+                {
+                    unsigned Color = TokenToUnsigned(Value);
+                    WindowRule->Color = Color;
+                }
+            }
+            else if(StringEquals(Arg, "--border"))
+            {
+                token Value = GetToken(&Payload->Message);
+                if(Value.Length > 0)
+                {
+                    bool DrawBorder = TokenToInt(Value);
+                    WindowRule->DrawBorder = DrawBorder;
+                }
+            }
+        }
+
+        // NOTE(splintah): prevent double rule.
+        bool RuleUpdated = false;
+        for(int Index = 0; Index < WindowRules.size(); ++Index)
+        {
+            if(StringEquals(WindowRules.at(Index)->Owner, WindowRule->Owner))
+            {
+                WindowRules.at(Index) = WindowRule;
+                RuleUpdated = true;
+            }
+        }
+
+        if(!RuleUpdated)
+        {
+            // window_rule *Result = (window_rule *) malloc(sizeof(window_rule));
+            // memcpy(Result, WindowRule, sizeof(window_rule));
+            WindowRules.push_back(WindowRule);
+        }
+
     }
 }
 
@@ -340,6 +445,7 @@ PLUGIN_MAIN_FUNC(PluginMain)
     else if(StringEquals(Node, "chunkwm_export_application_activated"))
     {
         ApplicationActivatedHandler(Data);
+        UpdateBorderCustomColor(Application);
         return true;
     }
     else if(StringEquals(Node, "chunkwm_export_application_deactivated"))
@@ -355,6 +461,7 @@ PLUGIN_MAIN_FUNC(PluginMain)
     else if(StringEquals(Node, "chunkwm_export_window_focused"))
     {
         WindowFocusedHandler(Data);
+        UpdateBorderCustomColor(Application);
         return true;
     }
     else if(StringEquals(Node, "chunkwm_export_window_moved"))
