@@ -174,6 +174,7 @@ internal inline void
 ApplicationActivatedHandler(void *Data)
 {
     Application = (macos_application *) Data;
+    UpdateBorderCustomColor(Application);
     UpdateToFocusedWindow();
 }
 
@@ -299,6 +300,21 @@ StringEquals(const char *A, const char *B)
 internal void
 UpdateBorderCustomColor(macos_application *FocusedApplication)
 {
+    AXUIElementRef WindowRef = GetFocusedWindow();
+    macos_window *FocusedWindow = AXLibConstructWindow(FocusedApplication, GetFocusedWindow());
+    CGSize WindowBounds = FocusedWindow->Size;
+
+    CFStringRef DisplayRef = AXLibGetDisplayIdentifierForMainDisplay();
+    CGRect DisplayBounds = AXLibGetDisplayBounds(DisplayRef);
+    CFRelease(DisplayRef);
+
+    if (AXLibIsWindowFullscreen(WindowRef) ||
+        (WindowBounds.height == CGRectGetHeight(DisplayBounds) &&
+        WindowBounds.width == CGRectGetWidth(DisplayBounds)))
+    {
+        return;
+    }
+
     char *WindowName = FocusedApplication->Name;
 
     bool CustomColorSpecifiedForWindow = false;
@@ -443,7 +459,6 @@ PLUGIN_MAIN_FUNC(PluginMain)
     else if(StringEquals(Node, "chunkwm_export_application_activated"))
     {
         ApplicationActivatedHandler(Data);
-        UpdateBorderCustomColor(Application);
         return true;
     }
     else if(StringEquals(Node, "chunkwm_export_application_deactivated"))
@@ -459,7 +474,6 @@ PLUGIN_MAIN_FUNC(PluginMain)
     else if(StringEquals(Node, "chunkwm_export_window_focused"))
     {
         WindowFocusedHandler(Data);
-        UpdateBorderCustomColor(Application);
         return true;
     }
     else if(StringEquals(Node, "chunkwm_export_window_moved"))
