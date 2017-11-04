@@ -113,6 +113,7 @@ UpdateWindowCustomBorder(macos_application *Application)
 
     if(ApplicationRules.Color)
     {
+        ClearBorderWindow(Border);
         Border = CreateBorderWindow(0, 0, 0, 0, ApplicationRules.Width, ApplicationRules.Radius, ApplicationRules.Color);
     }
 }
