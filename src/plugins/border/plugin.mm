@@ -221,7 +221,7 @@ WindowFocusedHandler(void *Data)
     macos_window *Window = (macos_window *) Data;
 
     if((AXLibIsWindowStandard(Window)) &&
-    ((Window->Owner == Application) ||
+        ((Window->Owner == Application) ||
        (Application == NULL)))
     {
         CFStringRef DisplayRef = AXLibGetDisplayIdentifierFromWindow(Window->Id);
