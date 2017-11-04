@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#include <vector>
+#include <string>
 
 #include "../../api/plugin_api.h"
 #include "../../common/accessibility/display.h"
@@ -20,22 +20,26 @@
 #include "../../common/config/cvar.cpp"
 #include "../../common/border/border.mm"
 
+#include <map>
+
+struct application_border_settings
+{
+    unsigned Color;
+    int Width;
+    int Radius;
+    bool Ignore;
+};
+
 #define internal static
+
+typedef std::map<std::string, struct application_border_settings> window_border_settings_map;
+internal window_border_settings_map ApplicationBorderSettingsMap;
 
 internal macos_application *Application;
 internal border_window *Border;
 internal bool SkipFloating;
 internal bool DrawBorder;
 internal chunkwm_api API;
-internal void UpdateBorderCustomColor(macos_application *FocusedApplication);
-
-struct window_rule
-{
-    char *Owner;
-    unsigned Color;
-    bool DrawBorder;
-};
-internal std::vector<window_rule *> WindowRules;
 
 internal AXUIElementRef
 GetFocusedWindow()
@@ -62,7 +66,7 @@ CreateBorder(int X, int Y, int W, int H)
     unsigned Color = CVarUnsignedValue("focused_border_color");
     int Width = CVarIntegerValue("focused_border_width");
     int Radius = CVarIntegerValue("focused_border_radius");
-    Border = CreateBorderWindow(X, Y, W, H, Width, Radius, Color, false);
+    Border = CreateBorderWindow(X, Y, W, H, Width, Radius, Color);
 }
 
 internal inline void
@@ -91,6 +95,25 @@ FuckingMacOSMonitorBoundsChangingBetweenPrimaryAndMainMonitor(AXUIElementRef Win
     else
     {
         CreateBorder(Position.x, InvertY, Size.width, Size.height);
+    }
+}
+
+internal void
+UpdateWindowCustomBorder(macos_application *Application)
+{
+    std::string ApplicationName(Application->Name);
+
+    application_border_settings ApplicationRules = ApplicationBorderSettingsMap[ApplicationName];
+
+    if(ApplicationRules.Ignore)
+    {
+        UpdateBorderWindowColor(Border, 0);
+        return;
+    }
+
+    if(ApplicationRules.Color)
+    {
+        Border = CreateBorderWindow(0, 0, 0, 0, ApplicationRules.Width, ApplicationRules.Radius, ApplicationRules.Color);
     }
 }
 
@@ -174,7 +197,7 @@ internal inline void
 ApplicationActivatedHandler(void *Data)
 {
     Application = (macos_application *) Data;
-    UpdateBorderCustomColor(Application);
+    UpdateWindowCustomBorder(Application);
     UpdateToFocusedWindow();
 }
 
@@ -197,10 +220,8 @@ WindowFocusedHandler(void *Data)
 {
     macos_window *Window = (macos_window *) Data;
 
-    UpdateBorderCustomColor(Window->Owner);
-
     if((AXLibIsWindowStandard(Window)) &&
-       ((Window->Owner == Application) ||
+    ((Window->Owner == Application) ||
        (Application == NULL)))
     {
         CFStringRef DisplayRef = AXLibGetDisplayIdentifierFromWindow(Window->Id);
@@ -298,50 +319,6 @@ StringEquals(const char *A, const char *B)
 }
 
 internal void
-UpdateBorderCustomColor(macos_application *FocusedApplication)
-{
-    AXUIElementRef WindowRef = GetFocusedWindow();
-    macos_window *FocusedWindow = AXLibConstructWindow(FocusedApplication, GetFocusedWindow());
-    CGSize WindowBounds = FocusedWindow->Size;
-
-    CFStringRef DisplayRef = AXLibGetDisplayIdentifierForMainDisplay();
-    CGRect DisplayBounds = AXLibGetDisplayBounds(DisplayRef);
-    CFRelease(DisplayRef);
-
-    if (AXLibIsWindowFullscreen(WindowRef) ||
-        (WindowBounds.height == CGRectGetHeight(DisplayBounds) &&
-        WindowBounds.width == CGRectGetWidth(DisplayBounds)))
-    {
-        return;
-    }
-
-    char *WindowName = FocusedApplication->Name;
-
-    bool CustomColorSpecifiedForWindow = false;
-
-    for(int Index = 0; Index < WindowRules.size(); ++Index)
-    {
-        window_rule *WindowRule = WindowRules.at(Index);
-        if(StringEquals(WindowRule->Owner, WindowName))
-        {
-            CustomColorSpecifiedForWindow = true;
-
-            if(!WindowRule->DrawBorder)
-            {
-                UpdateBorderWindowColor(Border, 0x00000000);
-                break;
-            }
-
-            UpdateBorderWindowColor(Border, WindowRule->Color);
-            break;
-        }
-    }
-
-    if(!CustomColorSpecifiedForWindow)
-        UpdateBorderWindowColor(Border, CVarUnsignedValue("focused_border_color"));
-}
-
-internal void
 CommandHandler(void *Data)
 {
     chunkwm_payload *Payload = (chunkwm_payload *) Data;
@@ -366,9 +343,12 @@ CommandHandler(void *Data)
     }
     else if(StringEquals(Payload->Command, "rule"))
     {
-        window_rule *WindowRule = (window_rule *) malloc(sizeof(window_rule));
-        WindowRule->Color = CVarUnsignedValue("focused_border_color");
-        WindowRule->DrawBorder = true;
+        application_border_settings ApplicationRules;
+        char *Name = NULL;
+        ApplicationRules.Color = CVarUnsignedValue("focused_border_color");
+        ApplicationRules.Ignore = false;
+        ApplicationRules.Width = CVarIntegerValue("focused_border_width");
+        ApplicationRules.Radius = CVarIntegerValue("focused_border_radius");
 
         while(Payload->Message)
         {
@@ -379,13 +359,12 @@ CommandHandler(void *Data)
 
             char *Arg = TokenToString(Token);
 
-            if(StringEquals(Arg, "--owner"))
+            if(StringEquals(Arg, "--name"))
             {
                 token Value = GetToken(&Payload->Message);
                 if(Value.Length > 0)
                 {
-                    char *Owner = TokenToString(Value);
-                    WindowRule->Owner = Owner;
+                    Name = TokenToString(Value);
                 }
             }
             else if(StringEquals(Arg, "--color"))
@@ -394,36 +373,44 @@ CommandHandler(void *Data)
                 if(Value.Length > 0)
                 {
                     unsigned Color = TokenToUnsigned(Value);
-                    WindowRule->Color = Color;
+                    ApplicationRules.Color = Color;
                 }
             }
-            else if(StringEquals(Arg, "--border"))
+            else if(StringEquals(Arg, "--ignore"))
             {
                 token Value = GetToken(&Payload->Message);
                 if(Value.Length > 0)
                 {
-                    bool DrawBorder = TokenToInt(Value);
-                    WindowRule->DrawBorder = DrawBorder;
+                    bool Ignore = TokenToInt(Value);
+                    ApplicationRules.Ignore = Ignore;
+                }
+            }
+            else if(StringEquals(Arg, "--width"))
+            {
+                token Value = GetToken(&Payload->Message);
+                if(Value.Length > 0)
+                {
+                    int Width = TokenToInt(Value);
+                    ApplicationRules.Width = Width;
+                }
+            }
+            else if(StringEquals(Arg, "--radius"))
+            {
+                token Value = GetToken(&Payload->Message);
+                if(Value.Length > 0)
+                {
+                    int Radius = TokenToInt(Value);
+                    ApplicationRules.Radius = Radius;
                 }
             }
         }
 
-        // NOTE(splintah): prevent double rule.
-        bool RuleUpdated = false;
-        for(int Index = 0; Index < WindowRules.size(); ++Index)
-        {
-            if(StringEquals(WindowRules.at(Index)->Owner, WindowRule->Owner))
-            {
-                WindowRules.at(Index) = WindowRule;
-                RuleUpdated = true;
-            }
-        }
 
-        if(!RuleUpdated)
+        if(Name != NULL)
         {
-            WindowRules.push_back(WindowRule);
+            std::string NameString(Name);
+            ApplicationBorderSettingsMap[NameString] = ApplicationRules;
         }
-
     }
 }
 
