@@ -315,7 +315,7 @@ ApplyWindowRules()
 
     macos_window *Window = AXLibConstructWindow(Application, WindowRef);
 
-    border_rule *BorderRule = (border_rule *) malloc(sizeof(border_rule));
+    border_rule *BorderRule = NULL;
 
     bool WindowMatch = false;
     for(size_t Index = 0;
@@ -324,34 +324,45 @@ ApplyWindowRules()
     {
         border_rule *Rule = BorderRules[Index];
 
-        if(Rule->Owner && Window->Owner->Name
-            && Rule->Name && Window->Name
-            && StringEquals(Rule->Owner, Window->Owner->Name)
-            && StringEquals(Rule->Name, Window->Name))
+        if(Rule->Owner && Window->Owner->Name &&
+           Rule->Name && Window->Name &&
+           StringEquals(Rule->Owner, Window->Owner->Name) &&
+           StringEquals(Rule->Name, Window->Name))
         {
             BorderRule = Rule;
             break;
         }
 
-        if(Rule->Name && Window->Name
-            && StringEquals(Rule->Name, Window->Name))
+        if(Rule->Name && Window->Name &&
+           !Rule->Owner && !Window->Owner->Name &&
+           StringEquals(Rule->Name, Window->Name))
         {
             BorderRule = Rule;
             WindowMatch = true;
         }
-        else if(Rule->Owner && Window->Owner->Name
-            && !WindowMatch && StringEquals(Rule->Owner, Window->Owner->Name))
+        else if(Rule->Owner && Window->Owner->Name &&
+               !WindowMatch && StringEquals(Rule->Owner, Window->Owner->Name))
         {
             BorderRule = Rule;
         }
     }
 
     if(BorderRule == NULL)
+    {
+        unsigned Color = CVarUnsignedValue("focused_border_color");
+        int Width = CVarIntegerValue("focused_border_width");
+        int Radius = CVarIntegerValue("focused_border_radius");
+
+        ClearBorderWindow(Border);
+        Border = CreateBorderWindow(0, 0, 0, 0, Width, Radius, Color);
+
         return;
+    }
 
     if(BorderRule->Ignore)
     {
         UpdateBorderWindowColor(Border, 0x00000000);
+        ClearBorderWindow(Border);
         return;
     }
 
@@ -361,7 +372,13 @@ ApplyWindowRules()
         {
             ClearBorderWindow(Border);
         }
-        Border = CreateBorderWindow(0, 0, 0, 0, BorderRule->Width, BorderRule->Radius, BorderRule->Color);
+        if(Border->Width != BorderRule->Width ||
+           Border->Radius != BorderRule->Radius ||
+           Border->Color != BorderRule->Color)
+        {
+            ClearBorderWindow(Border);
+            Border = CreateBorderWindow(0, 0, 0, 0, BorderRule->Width, BorderRule->Radius, BorderRule->Color);
+        }
     }
 
 }
