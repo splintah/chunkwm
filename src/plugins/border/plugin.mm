@@ -352,6 +352,7 @@ ApplyWindowRules()
     if(BorderRule->Ignore)
     {
         UpdateBorderWindowColor(Border, 0x00000000);
+        ClearBorderWindow(Border);
         return;
     }
 
@@ -570,7 +571,7 @@ PLUGIN_MAIN_FUNC(PluginMain)
         return true;
     }
     else if((StringEquals(Node, "chunkwm_export_space_changed")) ||
-            (StringEquals(Node, "chunkwm_export_display_changed")))
+    (StringEquals(Node, "chunkwm_export_display_changed")))
     {
         SpaceChangedHandler();
         return true;
