@@ -20,10 +20,12 @@
 #include "../../common/config/cvar.cpp"
 #include "../../common/border/border.mm"
 
-#include <map>
+#include <vector>
 
-struct application_border_settings
+struct border_rule
 {
+    char *Owner;
+    char *Name;
     unsigned Color;
     int Width;
     int Radius;
@@ -32,8 +34,7 @@ struct application_border_settings
 
 #define internal static
 
-typedef std::map<std::string, struct application_border_settings> window_border_settings_map;
-internal window_border_settings_map ApplicationBorderSettingsMap;
+std::vector<border_rule *> BorderRules;
 
 internal macos_application *Application;
 internal border_window *Border;
@@ -95,26 +96,6 @@ FuckingMacOSMonitorBoundsChangingBetweenPrimaryAndMainMonitor(AXUIElementRef Win
     else
     {
         CreateBorder(Position.x, InvertY, Size.width, Size.height);
-    }
-}
-
-internal void
-UpdateWindowCustomBorder(macos_application *Application)
-{
-    std::string ApplicationName(Application->Name);
-
-    application_border_settings ApplicationRules = ApplicationBorderSettingsMap[ApplicationName];
-
-    if(ApplicationRules.Ignore)
-    {
-        UpdateBorderWindowColor(Border, 0);
-        return;
-    }
-
-    if(ApplicationRules.Color)
-    {
-        ClearBorderWindow(Border);
-        Border = CreateBorderWindow(0, 0, 0, 0, ApplicationRules.Width, ApplicationRules.Radius, ApplicationRules.Color);
     }
 }
 
@@ -198,7 +179,6 @@ internal inline void
 ApplicationActivatedHandler(void *Data)
 {
     Application = (macos_application *) Data;
-    UpdateWindowCustomBorder(Application);
     UpdateToFocusedWindow();
 }
 
@@ -320,6 +300,73 @@ StringEquals(const char *A, const char *B)
 }
 
 internal void
+ApplyWindowRules()
+{
+    if(!Application)
+        return;
+    AXUIElementRef WindowRef = GetFocusedWindow();
+
+    if(!WindowRef)
+        return;
+
+    uint32_t WindowId = AXLibGetWindowID(WindowRef);
+    if(!WindowId)
+        return;
+
+    macos_window *Window = AXLibConstructWindow(Application, WindowRef);
+
+    border_rule *BorderRule = (border_rule *) malloc(sizeof(border_rule));
+
+    bool WindowMatch = false;
+    for(size_t Index = 0;
+        Index < BorderRules.size();
+        ++Index)
+    {
+        border_rule *Rule = BorderRules[Index];
+
+        if(Rule->Owner && Window->Owner->Name
+            && Rule->Name && Window->Name
+            && StringEquals(Rule->Owner, Window->Owner->Name)
+            && StringEquals(Rule->Name, Window->Name))
+        {
+            BorderRule = Rule;
+            break;
+        }
+
+        if(Rule->Name && Window->Name
+            && StringEquals(Rule->Name, Window->Name))
+        {
+            BorderRule = Rule;
+            WindowMatch = true;
+        }
+        else if(Rule->Owner && Window->Owner->Name
+            && !WindowMatch && StringEquals(Rule->Owner, Window->Owner->Name))
+        {
+            BorderRule = Rule;
+        }
+    }
+
+    if(BorderRule == NULL)
+        return;
+
+    if(BorderRule->Ignore)
+    {
+        UpdateBorderWindowColor(Border, 0x00000000);
+        return;
+    }
+
+    if(BorderRule->Color)
+    {
+        if(Border)
+        {
+            ClearBorderWindow(Border);
+        }
+        Border = CreateBorderWindow(0, 0, 0, 0, BorderRule->Width, BorderRule->Radius, BorderRule->Color);
+    }
+
+}
+
+internal void
 CommandHandler(void *Data)
 {
     chunkwm_payload *Payload = (chunkwm_payload *) Data;
@@ -344,12 +391,13 @@ CommandHandler(void *Data)
     }
     else if(StringEquals(Payload->Command, "rule"))
     {
-        application_border_settings ApplicationRules;
-        char *Name = NULL;
-        ApplicationRules.Color = CVarUnsignedValue("focused_border_color");
-        ApplicationRules.Ignore = false;
-        ApplicationRules.Width = CVarIntegerValue("focused_border_width");
-        ApplicationRules.Radius = CVarIntegerValue("focused_border_radius");
+        border_rule *BorderRule = (border_rule *) malloc(sizeof(border_rule));
+        BorderRule->Owner = NULL;
+        BorderRule->Name = NULL;
+        BorderRule->Color = CVarUnsignedValue("focused_border_color");
+        BorderRule->Ignore = false;
+        BorderRule->Width = CVarIntegerValue("focused_border_width");
+        BorderRule->Radius = CVarIntegerValue("focused_border_radius");
 
         while(Payload->Message)
         {
@@ -360,12 +408,20 @@ CommandHandler(void *Data)
 
             char *Arg = TokenToString(Token);
 
-            if(StringEquals(Arg, "--name"))
+            if(StringEquals(Arg, "--owner"))
             {
                 token Value = GetToken(&Payload->Message);
                 if(Value.Length > 0)
                 {
-                    Name = TokenToString(Value);
+                    BorderRule->Owner = TokenToString(Value);
+                }
+            }
+            else if(StringEquals(Arg, "--name"))
+            {
+                token Value = GetToken(&Payload->Message);
+                if(Value.Length > 0)
+                {
+                    BorderRule->Name = TokenToString(Value);
                 }
             }
             else if(StringEquals(Arg, "--color"))
@@ -374,7 +430,7 @@ CommandHandler(void *Data)
                 if(Value.Length > 0)
                 {
                     unsigned Color = TokenToUnsigned(Value);
-                    ApplicationRules.Color = Color;
+                    BorderRule->Color = Color;
                 }
             }
             else if(StringEquals(Arg, "--ignore"))
@@ -383,7 +439,7 @@ CommandHandler(void *Data)
                 if(Value.Length > 0)
                 {
                     bool Ignore = TokenToInt(Value);
-                    ApplicationRules.Ignore = Ignore;
+                    BorderRule->Ignore = Ignore;
                 }
             }
             else if(StringEquals(Arg, "--width"))
@@ -392,7 +448,7 @@ CommandHandler(void *Data)
                 if(Value.Length > 0)
                 {
                     int Width = TokenToInt(Value);
-                    ApplicationRules.Width = Width;
+                    BorderRule->Width = Width;
                 }
             }
             else if(StringEquals(Arg, "--radius"))
@@ -401,16 +457,49 @@ CommandHandler(void *Data)
                 if(Value.Length > 0)
                 {
                     int Radius = TokenToInt(Value);
-                    ApplicationRules.Radius = Radius;
+                    BorderRule->Radius = Radius;
                 }
             }
         }
 
-
-        if(Name != NULL)
+        if(BorderRule->Owner || BorderRule->Name)
         {
-            std::string NameString(Name);
-            ApplicationBorderSettingsMap[NameString] = ApplicationRules;
+            bool RuleChanged = false;
+            bool WindowMatch = false;
+            for(size_t Index = 0;
+                Index < BorderRules.size();
+                ++Index)
+            {
+                border_rule *Rule = BorderRules[Index];
+
+                if(Rule->Owner && BorderRule->Owner && Rule->Name && BorderRule->Name
+                    && StringEquals(Rule->Owner, BorderRule->Owner)
+                    && StringEquals(Rule->Name, BorderRule->Name))
+                {
+                    BorderRules[Index] = BorderRule;
+                    RuleChanged = true;
+                    break;
+                }
+
+                if(Rule->Name && BorderRule->Name
+                    && StringEquals(Rule->Name, BorderRule->Name))
+                {
+                    BorderRules[Index] = BorderRule;
+                    RuleChanged = true;
+                    WindowMatch = true;
+                }
+                else if(Rule->Owner && BorderRule->Owner
+                    && !WindowMatch && StringEquals(Rule->Owner, BorderRule->Owner))
+                {
+                    BorderRules[Index] = BorderRule;
+                    RuleChanged = true;
+                }
+            }
+
+            if(!RuleChanged)
+            {
+                BorderRules.push_back(BorderRule);
+            }
         }
     }
 }
@@ -447,6 +536,7 @@ PLUGIN_MAIN_FUNC(PluginMain)
     else if(StringEquals(Node, "chunkwm_export_application_activated"))
     {
         ApplicationActivatedHandler(Data);
+        ApplyWindowRules();
         return true;
     }
     else if(StringEquals(Node, "chunkwm_export_application_deactivated"))
