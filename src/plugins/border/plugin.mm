@@ -302,6 +302,9 @@ StringEquals(const char *A, const char *B)
 internal void
 ApplyWindowRules()
 {
+    if(BorderRules.size() <= 0)
+        return
+
     if(!Application)
         return;
     AXUIElementRef WindowRef = GetFocusedWindow();
