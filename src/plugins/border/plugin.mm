@@ -591,6 +591,7 @@ PLUGIN_MAIN_FUNC(PluginMain)
             (StringEquals(Node, "chunkwm_export_display_changed")))
     {
         SpaceChangedHandler();
+        ApplyWindowRules();
         return true;
     }
     else if(StringEquals(Node, "chunkwm_daemon_command"))
