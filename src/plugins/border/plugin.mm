@@ -303,7 +303,7 @@ internal void
 ApplyWindowRules()
 {
     if(BorderRules.size() <= 0)
-        return
+        return;
 
     if(!Application)
         return;
