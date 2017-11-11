@@ -569,6 +569,7 @@ PLUGIN_MAIN_FUNC(PluginMain)
     else if(StringEquals(Node, "chunkwm_export_window_focused"))
     {
         WindowFocusedHandler(Data);
+        ApplyWindowRules();
         return true;
     }
     else if(StringEquals(Node, "chunkwm_export_window_moved"))
